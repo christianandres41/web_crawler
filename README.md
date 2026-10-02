@@ -44,6 +44,33 @@ hn-crawler --filter short-titles --database usage.sqlite3
 
 The CLI will emit JSON on stdout and diagnostics on stderr.
 
+## Scraping the front page
+
+
+```python
+from hn_crawler.scraper import crawl_front_page
+from hn_crawler.filters import filter_long_titles
+
+entries = crawl_front_page()
+filtered = filter_long_titles(entries)
+```
+
+`fetch_front_page()` retrieves HTML, `parse_front_page(html)` parses an existing
+snapshot without network access, and `crawl_front_page()` combines the two.
+The scraper returns exactly 30 entries, retaining ranks 1 through 30. It ignores
+extra entries and never follows story links or pagination.
+
+HTTP requests use a descriptive User-Agent, a 5-second connection timeout, and a
+15-second read timeout, with no automatic retries. A read timeout measures socket
+inactivity, not total elapsed time. Network and unsuccessful HTTP responses raise
+`FetchError`; incomplete pages or malformed entry data raise `ParseError`. Both
+inherit from `ScraperError`.
+
+Parsing pairs each story row with its immediately following metadata row. Missing
+scores or comment links and `discuss` become zero, including job listings. A
+missing metadata row, blank title, invalid rank, or malformed present count raises
+an error. Entries are never skipped to fill the result with later stories.
+
 ## Using the title filters
 
 The functions accept an iterable of entries and return a new sorted list without
@@ -75,11 +102,14 @@ the installed package.
 Entries use a frozen dataclass to prevent accidental changes to scraped values.
 Filtering uses pure functions so it can be tested without network or storage.
 Each filter sorts by its metric descending and original rank ascending for ties.
-HTTP fetching, HTML parsing, and SQLite persistence will have separate boundaries.
-The intended stack is requests, Beautiful Soup, and standard-library sqlite3 and
-argparse. One front-page fetch per invocation is sufficient for this scope.
+HTTP fetching and HTML parsing have separate boundaries; SQLite persistence will
+remain separate as well.
+The scraper uses requests and Beautiful Soup with Python’s built-in HTML parser.
+Storage and the CLI will use standard-library sqlite3 and argparse. One front-page fetch per invocation is sufficient for this scope.
 
-Automated tests will use local fixtures rather than depend on changing live data.
+Automated tests use a synthetic HTML fixture and mocked HTTP rather than depend
+on changing live data. The fixture includes 31 entries, a job listing, singular
+and plural counts, HTML entities, and absent optional metadata.
 Legitimately absent scores or comment counts will be treated as zero. Invalid
 required fields, fewer than 30 parsed entries, and storage failures will produce
 explicit errors instead of silently returning an incomplete result.
