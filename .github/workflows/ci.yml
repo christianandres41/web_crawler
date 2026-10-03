@@ -1,0 +1,32 @@
+name: Tests
+
+on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install package and tests
+        run: python -m pip install ".[dev]"
+      - name: Check dependencies
+        run: python -m pip check
+      - name: Run offline tests
+        run: python -m pytest
+      - name: Check entry points
+        run: |
+          hn-crawler --help
+          python -m hn_crawler --help

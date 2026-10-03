@@ -46,6 +46,18 @@ The CLI emits a JSON array on stdout and diagnostics on stderr. The default
 filter is `all`; the default database is `usage.sqlite3` in the current directory.
 Use an existing directory for custom database paths. An empty result is `[]`.
 Each entry has exactly `number`, `title`, `points`, and `comments` fields.
+For example, an illustrative one-entry filtered result is:
+
+```json
+[
+  {
+    "number": 4,
+    "title": "This is - a self-explained example",
+    "points": 42,
+    "comments": 7
+  }
+]
+```
 
 ```sh
 hn-crawler --help
@@ -71,7 +83,6 @@ its own failure. Success records describe completed crawling/filtering; duration
 covers that work, excluding database writes and output delivery.
 
 ## Scraping the front page
-
 
 ```python
 from hn_crawler.scraper import crawl_front_page
@@ -187,7 +198,8 @@ Filtering uses pure functions so it can be tested without network or storage.
 Each filter sorts by its metric descending and original rank ascending for ties.
 HTTP fetching, HTML parsing, and SQLite persistence have separate boundaries.
 The scraper uses requests and Beautiful Soup with Python’s built-in HTML parser.
-Storage uses standard-library sqlite3; the CLI uses argparse. One front-page fetch per invocation is sufficient for this scope.
+Storage uses standard-library sqlite3; the CLI uses argparse. One front-page
+fetch per invocation is sufficient for this scope.
 
 Automated tests use a synthetic HTML fixture and mocked HTTP rather than depend
 on changing live data. The fixture includes 31 entries, a job listing, singular
@@ -199,3 +211,57 @@ explicit errors instead of silently returning an incomplete result.
 CLI integration tests exercise real parsing, filtering, JSON output, and temporary
 SQLite storage with mocked HTTP. They cover every filter, empty results, request
 and parse failures, storage failures, defaults, timing, and argument handling.
+
+
+## Verification and review
+
+Run the full offline suite and dependency check:
+
+```sh
+python -m pytest
+python -m pip check
+```
+
+[CI](.github/workflows/ci.yml) installs the package, runs the offline suite, checks
+installed dependencies, and exercises both CLI entry points on Python 3.10–3.14.
+It runs on pushes, pull requests, and manual dispatch. CI does not contact Hacker
+News; dependency installation does need network access. The workflow follows
+[GitHub's Python testing guide](https://docs.github.com/en/actions/tutorials/build-and-test-code/python).
+
+
+To check the live CLI manually, run `hn-crawler --filter all --database
+usage.sqlite3`. This makes a real request and appends one usage record. Inspect
+stored interactions using Python (no SQLite command-line tool required):
+
+```python
+import sqlite3
+from contextlib import closing
+
+with closing(sqlite3.connect("usage.sqlite3")) as connection:
+    for row in connection.execute(
+        "SELECT request_timestamp, filter_id, outcome, result_count "
+        "FROM usage_records ORDER BY id DESC LIMIT 10"
+    ):
+        print(row)
+```
+
+## Scope and limitations
+
+This is a one-page HTML scraper. It does not crawl linked articles, use the HN
+API, paginate, cache snapshots, or retry requests. Each CLI invocation gets a new
+snapshot, so separate filter commands may see different entries. In Python,
+fetch once and apply both filter functions to the same list when comparing them.
+
+The parser depends on HN's current row layout and ranks 1–30. Structural changes
+can cause explicit parsing failures; absent optional counts remain zero. Empty
+titles are rejected by the scraper even though the standalone filter functions
+can accept them. Descending metric order and rank tie-breaking are documented
+interpretations of the requirement's unspecified sort direction.
+
+SQLite fits a small local command-line tool. It has no retention policy, schema
+migration framework, or multi-user service layer; usage grows until the database
+is removed or archived. Unexpected programming errors, process termination, and
+output-stream failures are outside the recorded fetch/parse failure paths. A
+stored success means crawling/filtering succeeded, not that a downstream consumer
+received the JSON. Dependencies use compatible version ranges, not a lockfile,
+so exact dependency versions may differ between installations.
