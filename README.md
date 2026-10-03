@@ -42,7 +42,33 @@ hn-crawler --filter long-titles
 hn-crawler --filter short-titles --database usage.sqlite3
 ```
 
-The CLI will emit JSON on stdout and diagnostics on stderr.
+The CLI emits a JSON array on stdout and diagnostics on stderr. The default
+filter is `all`; the default database is `usage.sqlite3` in the current directory.
+Use an existing directory for custom database paths. An empty result is `[]`.
+Each entry has exactly `number`, `title`, `points`, and `comments` fields.
+
+```sh
+hn-crawler --help
+hn-crawler --filter long-titles > entries.json
+python -m hn_crawler --filter short-titles --database usage.sqlite3
+```
+
+After updating the checkout, rerun `python -m pip install -e '.[dev]'` to register
+the console command. `python -m hn_crawler` provides the same interface.
+
+| Exit code | Meaning |
+| --- | --- |
+| `0` | Crawl succeeded and usage was stored, or help was displayed |
+| `1` | Fetching or parsing failed; a failure usage record was stored |
+| `2` | Invalid command-line arguments |
+| `3` | Usage could not be stored |
+
+The CLI records one usage row per valid crawl attempt, including fetch and parse
+failures. Help and invalid arguments do not fetch or write usage. JSON is emitted
+only after usage is committed. If both crawling and storage fail, both errors are
+reported and exit code `3` takes precedence. An unavailable database cannot store
+its own failure. Success records describe completed crawling/filtering; duration
+covers that work, excluding database writes and output delivery.
 
 ## Scraping the front page
 
@@ -96,7 +122,8 @@ therefore fall into the short-title filter.
 
 ## Recording usage
 
-SQLite storage is implemented. No additional database service or dependency is required.
+The CLI records usage automatically. For direct Python calls, use the storage
+interface below. No additional database service or dependency is required.
 
 ```python
 from datetime import datetime, timezone
@@ -144,7 +171,7 @@ The parent directory must exist; empty paths and `:memory:` are rejected because
 usage must survive closed connections. SQLite waits up to five seconds for locks.
 Database failures raise `StorageError` with the original SQLite exception attached;
 they are never silently ignored. An unavailable database cannot record its own
-failure, so the CLI will need to report that error to the user.
+failure, so the CLI reports that error to the user.
 
 Local `.sqlite3` files and their sidecars are ignored by Git. Tests use temporary
 SQLite files to check persisted fields, UTC conversion, multiple connections,
@@ -160,7 +187,7 @@ Filtering uses pure functions so it can be tested without network or storage.
 Each filter sorts by its metric descending and original rank ascending for ties.
 HTTP fetching, HTML parsing, and SQLite persistence have separate boundaries.
 The scraper uses requests and Beautiful Soup with Python’s built-in HTML parser.
-Storage uses standard-library sqlite3; the CLI will use argparse. One front-page fetch per invocation is sufficient for this scope.
+Storage uses standard-library sqlite3; the CLI uses argparse. One front-page fetch per invocation is sufficient for this scope.
 
 Automated tests use a synthetic HTML fixture and mocked HTTP rather than depend
 on changing live data. The fixture includes 31 entries, a job listing, singular
@@ -168,3 +195,7 @@ and plural counts, HTML entities, and absent optional metadata.
 Legitimately absent scores or comment counts will be treated as zero. Invalid
 required fields, fewer than 30 parsed entries, and storage failures will produce
 explicit errors instead of silently returning an incomplete result.
+
+CLI integration tests exercise real parsing, filtering, JSON output, and temporary
+SQLite storage with mocked HTTP. They cover every filter, empty results, request
+and parse failures, storage failures, defaults, timing, and argument handling.
