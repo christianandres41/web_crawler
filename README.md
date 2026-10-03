@@ -94,6 +94,62 @@ Letters and digits from Unicode are supported. Tabs, newlines, and nonbreaking
 spaces also separate words. Empty or symbol-only titles have zero words and
 therefore fall into the short-title filter.
 
+## Recording usage
+
+SQLite storage is implemented. No additional database service or dependency is required.
+
+```python
+from datetime import datetime, timezone
+from time import perf_counter
+
+from hn_crawler.storage import UsageRecord, UsageStore
+
+requested_at = datetime.now(timezone.utc)
+started = perf_counter()
+# Perform the crawl and selected filter here.
+UsageStore("usage.sqlite3").record(UsageRecord(
+    request_timestamp=requested_at,
+    filter_id="all",
+    outcome="success",
+    duration_ms=int((perf_counter() - started) * 1000),
+    fetched_count=30,
+    result_count=30,
+))
+```
+
+The counts above illustrate a successful unfiltered request; callers must supply
+actual counts. For a failed fetch, record `outcome="failure"`, zero counts, and
+`error_category="FetchError"`. A failed operation after fetching can retain its
+fetched count. Duration uses a monotonic clock, independently of the wall-clock
+request timestamp.
+
+The `usage_records` table contains:
+
+| Column | Meaning |
+| --- | --- |
+| `id` | Integer primary key identifying a stored invocation |
+| `request_timestamp` | Request start as ISO 8601 text, normalized to UTC |
+| `filter_id` | `all`, `long-titles`, or `short-titles` |
+| `outcome` | `success` or `failure` |
+| `duration_ms` | Nonnegative integer elapsed milliseconds |
+| `fetched_count` | Number of entries successfully fetched and parsed |
+| `result_count` | Number of resulting entries, at most the fetched count |
+| `error_category` | Optional error classification; null by default |
+
+`UsageRecord` is immutable and rejects naive timestamps, unknown filters/outcomes,
+and invalid counts or durations with `ValueError`. Each `UsageStore.record()`
+call creates the database/table if needed, commits one parameterized insert, and
+closes its connection. Reopening the same file preserves earlier records.
+The parent directory must exist; empty paths and `:memory:` are rejected because
+usage must survive closed connections. SQLite waits up to five seconds for locks.
+Database failures raise `StorageError` with the original SQLite exception attached;
+they are never silently ignored. An unavailable database cannot record its own
+failure, so the CLI will need to report that error to the user.
+
+Local `.sqlite3` files and their sidecars are ignored by Git. Tests use temporary
+SQLite files to check persisted fields, UTC conversion, multiple connections,
+success/failure records, parameterized values, and write failures.
+
 ## Design decisions
 
 The `src/` layout keeps package code separate from tests and ensures tests use
@@ -102,10 +158,9 @@ the installed package.
 Entries use a frozen dataclass to prevent accidental changes to scraped values.
 Filtering uses pure functions so it can be tested without network or storage.
 Each filter sorts by its metric descending and original rank ascending for ties.
-HTTP fetching and HTML parsing have separate boundaries; SQLite persistence will
-remain separate as well.
+HTTP fetching, HTML parsing, and SQLite persistence have separate boundaries.
 The scraper uses requests and Beautiful Soup with Python’s built-in HTML parser.
-Storage and the CLI will use standard-library sqlite3 and argparse. One front-page fetch per invocation is sufficient for this scope.
+Storage uses standard-library sqlite3; the CLI will use argparse. One front-page fetch per invocation is sufficient for this scope.
 
 Automated tests use a synthetic HTML fixture and mocked HTTP rather than depend
 on changing live data. The fixture includes 31 entries, a job listing, singular
